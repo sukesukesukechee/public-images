@@ -7,6 +7,23 @@ if ([string]::IsNullOrWhiteSpace($sourceFolder)) {
     $sourceFolder = (Get-Location).Path
 }
 
+# 画像一覧ファイル名
+$imageListFileName = "images.txt"
+$imageListPath = Join-Path -Path $sourceFolder -ChildPath $imageListFileName
+
+# 対象とする画像拡張子
+$imageExtensions = @(
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tif",
+    ".tiff",
+    ".svg"
+)
+
 function Select-FolderWithArrowKeys {
     param (
         [string]$BaseFolder
@@ -17,11 +34,18 @@ function Select-FolderWithArrowKeys {
         exit 1
     }
 
-    $folders = Get-ChildItem -Path $BaseFolder -Directory | Sort-Object Name
+    $folders = @(Get-ChildItem -Path $BaseFolder -Directory | Sort-Object Name)
 
     if ($folders.Count -eq 0) {
         Write-Host "選択できるフォルダがありません: $BaseFolder" -ForegroundColor Yellow
         exit 0
+    }
+
+    # フォルダが1つだけなら選択不要
+    if ($folders.Count -eq 1) {
+        Write-Host "移動先フォルダが1つだけのため、自動選択します。" -ForegroundColor Cyan
+        Write-Host "移動先フォルダ: $($folders[0].FullName)"
+        return $folders[0].FullName
     }
 
     $selectedIndex = 0
@@ -74,30 +98,61 @@ function Select-FolderWithArrowKeys {
     }
 }
 
-# 移動先フォルダを矢印キーで選択
-# 初期表示は、このps1が置かれているフォルダ直下のフォルダ一覧
+function Convert-ToRelativePath {
+    param (
+        [string]$BasePath,
+        [string]$TargetPath
+    )
+
+    $baseUri = New-Object System.Uri(($BasePath.TrimEnd('\') + '\'))
+    $targetUri = New-Object System.Uri($TargetPath)
+
+    $relativePath = $baseUri.MakeRelativeUri($targetUri).ToString()
+
+    # URL形式の / に統一
+    return [System.Uri]::UnescapeDataString($relativePath).Replace('\', '/')
+}
+
+function Update-ImageList {
+    param (
+        [string]$BaseFolder,
+        [string]$OutputPath,
+        [string[]]$Extensions
+    )
+
+    $imageFiles = Get-ChildItem -Path $BaseFolder -Recurse -File | Where-Object {
+        $Extensions -contains $_.Extension.ToLower()
+    } | Sort-Object FullName
+
+    $relativePaths = @()
+
+    foreach ($file in $imageFiles) {
+        $relativePaths += Convert-ToRelativePath -BasePath $BaseFolder -TargetPath $file.FullName
+    }
+
+    $relativePaths | Set-Content -Path $OutputPath -Encoding UTF8
+
+    Write-Host ""
+    Write-Host "画像一覧ファイルを生成しました。" -ForegroundColor Green
+    Write-Host "一覧ファイル: $OutputPath"
+}
+
+# 移動先フォルダを選択
+# フォルダが1つだけなら自動選択
 $destinationFolder = Select-FolderWithArrowKeys -BaseFolder $sourceFolder
 
-# 対象とする画像拡張子
-$imageExtensions = @(
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".bmp",
-    ".webp",
-    ".tif",
-    ".tiff"
-)
-
 # ps1が置かれているフォルダ直下の画像ファイルのみ取得
-$imageFiles = Get-ChildItem -Path $sourceFolder -File | Where-Object {
+$imageFiles = @(Get-ChildItem -Path $sourceFolder -File | Where-Object {
     $imageExtensions -contains $_.Extension.ToLower()
-}
+})
 
 if ($imageFiles.Count -eq 0) {
     Write-Host "画像ファイルが見つかりませんでした。" -ForegroundColor Yellow
     Write-Host "対象フォルダ: $sourceFolder"
+
+    # 画像がなくても、現在存在する画像一覧は毎回生成する
+    Update-ImageList -BaseFolder $sourceFolder -OutputPath $imageListPath -Extensions $imageExtensions
+
     exit 0
 }
 
@@ -121,3 +176,6 @@ Write-Host ""
 Write-Host "すべての画像ファイルの移動が完了しました。" -ForegroundColor Green
 Write-Host "移動元フォルダ: $sourceFolder"
 Write-Host "移動先フォルダ: $destinationFolder"
+
+# 実行完了時に、実行階層フォルダへ画像一覧を相対パスで生成
+Update-ImageList -BaseFolder $sourceFolder -OutputPath $imageListPath -Extensions $imageExtensions

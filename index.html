@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>公開画像一覧</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    :root {
+      --bg: #1e1f22;
+      --panel: #2b2d31;
+      --panel-dark: #111214;
+      --border: #3f4147;
+      --text: #f2f3f5;
+      --muted: #b5bac1;
+      --link: #8ab4ff;
+      --success: #57f287;
+      --danger: #ed4245;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .description {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .status {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .folder-section {
+      margin-top: 32px;
+    }
+
+    .folder-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .folder-count {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 16px;
+    }
+
+    .item {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      overflow: hidden;
+    }
+
+    .preview {
+      width: 100%;
+      height: 150px;
+      background:
+        linear-gradient(45deg, #18191c 25%, transparent 25%),
+        linear-gradient(-45deg, #18191c 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #18191c 75%),
+        linear-gradient(-45deg, transparent 75%, #18191c 75%);
+      background-color: var(--panel-dark);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .preview:hover {
+      outline: 2px solid var(--link);
+      outline-offset: 2px;
+    }
+
+    .preview img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .file-name {
+      margin-top: 10px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    .file-path {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+
+    .url {
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--panel-dark);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--link);
+      font-size: 12px;
+      line-height: 1.4;
+      word-break: break-all;
+      cursor: pointer;
+      user-select: all;
+    }
+
+    .url:hover {
+      background: #313338;
+    }
+
+    .copy-message {
+      margin-top: 8px;
+      color: var(--success);
+      font-size: 12px;
+      display: none;
+    }
+
+    .error {
+      color: var(--danger);
+      background: #2b1d20;
+      border: 1px solid #7f3036;
+      border-radius: 8px;
+      padding: 12px;
+      line-height: 1.6;
+    }
+
+    .empty {
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>公開画像一覧</h1>
+    <div class="description">
+      <code>images.txt</code> に記載された画像を階層ごとに表示します。<br>
+      画像、またはURLをクリックすると、その画像の公開URLをクリップボードにコピーします。
+    </div>
+    <div id="status" class="status">読み込み中...</div>
+  </header>
+
+  <main id="app"></main>
+
+  <script>
+    const IMAGES_TEXT_PATH = './images.txt';
+
+    const app = document.getElementById('app');
+    const status = document.getElementById('status');
+
+    function normalizePath(path) {
+      return path
+        .trim()
+        .replace(/^\.?\//, '')
+        .replace(/\\/g, '/');
+    }
+
+    function getFolderName(path) {
+      const normalized = normalizePath(path);
+      const lastSlashIndex = normalized.lastIndexOf('/');
+
+      if (lastSlashIndex === -1) {
+        return 'root';
+      }
+
+      return normalized.slice(0, lastSlashIndex);
+    }
+
+    function getFileName(path) {
+      const normalized = normalizePath(path);
+      const parts = normalized.split('/');
+      return parts[parts.length - 1];
+    }
+
+    function getAbsoluteImageUrl(path) {
+      const normalized = normalizePath(path);
+      return new URL(normalized, window.location.href).href;
+    }
+
+    function groupByFolder(paths) {
+      const groups = {};
+
+      for (const path of paths) {
+        const folder = getFolderName(path);
+
+        if (!groups[folder]) {
+          groups[folder] = [];
+        }
+
+        groups[folder].push(path);
+      }
+
+      return groups;
+    }
+
+    async function copyToClipboard(text, messageElement) {
+      try {
+        await navigator.clipboard.writeText(text);
+
+        messageElement.textContent = 'コピーしました';
+        messageElement.style.display = 'block';
+
+        setTimeout(() => {
+          messageElement.style.display = 'none';
+        }, 1200);
+      } catch (error) {
+        messageElement.textContent = 'コピーに失敗しました。URLを手動でコピーしてください。';
+        messageElement.style.display = 'block';
+      }
+    }
+
+    function createImageCard(path) {
+      const imageUrl = getAbsoluteImageUrl(path);
+      const fileName = getFileName(path);
+
+      const item = document.createElement('article');
+      item.className = 'item';
+
+      const preview = document.createElement('div');
+      preview.className = 'preview';
+      preview.title = 'クリックで画像URLをコピー';
+
+      const img = document.createElement('img');
+      img.src = './' + normalizePath(path);
+      img.alt = fileName;
+      img.loading = 'lazy';
+
+      const fileNameElement = document.createElement('div');
+      fileNameElement.className = 'file-name';
+      fileNameElement.textContent = fileName;
+
+      const filePathElement = document.createElement('div');
+      filePathElement.className = 'file-path';
+      filePathElement.textContent = normalizePath(path);
+
+      const urlElement = document.createElement('div');
+      urlElement.className = 'url';
+      urlElement.textContent = imageUrl;
+      urlElement.title = 'クリックで画像URLをコピー';
+
+      const copyMessage = document.createElement('div');
+      copyMessage.className = 'copy-message';
+
+      preview.addEventListener('click', () => {
+        copyToClipboard(imageUrl, copyMessage);
+      });
+
+      urlElement.addEventListener('click', () => {
+        copyToClipboard(imageUrl, copyMessage);
+      });
+
+      preview.appendChild(img);
+
+      item.appendChild(preview);
+      item.appendChild(fileNameElement);
+      item.appendChild(filePathElement);
+      item.appendChild(urlElement);
+      item.appendChild(copyMessage);
+
+      return item;
+    }
+
+    function render(groups) {
+      app.innerHTML = '';
+
+      const folderNames = Object.keys(groups).sort((a, b) => {
+        if (a === 'root') return -1;
+        if (b === 'root') return 1;
+        return a.localeCompare(b, 'ja');
+      });
+
+      for (const folder of folderNames) {
+        const paths = groups[folder].sort((a, b) => a.localeCompare(b, 'ja'));
+
+        const section = document.createElement('section');
+        section.className = 'folder-section';
+
+        const title = document.createElement('h2');
+        title.className = 'folder-title';
+
+        const folderName = document.createElement('span');
+        folderName.textContent = folder;
+
+        const count = document.createElement('span');
+        count.className = 'folder-count';
+        count.textContent = `${paths.length}件`;
+
+        title.appendChild(folderName);
+        title.appendChild(count);
+
+        const gallery = document.createElement('div');
+        gallery.className = 'gallery';
+
+        for (const path of paths) {
+          gallery.appendChild(createImageCard(path));
+        }
+
+        section.appendChild(title);
+        section.appendChild(gallery);
+        app.appendChild(section);
+      }
+    }
+
+    async function loadImages() {
+      try {
+        const response = await fetch(IMAGES_TEXT_PATH, {
+          cache: 'no-store'
+        });
+
+        if (!response.ok) {
+          throw new Error(`images.txt を読み込めませんでした。HTTP ${response.status}`);
+        }
+
+        const text = await response.text();
+
+        const imagePaths = text
+          .split(/\r?\n/)
+          .map(normalizePath)
+          .filter(line => line !== '')
+          .filter(line => !line.startsWith('#'));
+
+        if (imagePaths.length === 0) {
+          status.textContent = '';
+          app.innerHTML = '<div class="empty">images.txt に画像パスがありません。</div>';
+          return;
+        }
+
+        const groups = groupByFolder(imagePaths);
+
+        render(groups);
+
+        status.textContent = `${imagePaths.length}件の画像を表示しました。`;
+      } catch (error) {
+        status.textContent = '';
+
+        const errorElement = document.createElement('div');
+        errorElement.className = 'error';
+        errorElement.textContent = error.message;
+
+        app.innerHTML = '';
+        app.appendChild(errorElement);
+      }
+    }
+
+    loadImages();
+  </script>
+</body>
+</html>
